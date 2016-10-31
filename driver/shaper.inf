@@ -1,0 +1,62 @@
+;
+; shaper.inf
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = WFPCALLOUTS
+ClassGuid   = {57465043-616C-6C6F-7574-5F636C617373}
+Provider    = %ProviderString%
+CatalogFile = shaper.cat
+DriverVer   = 10/28/2016,0.0.0.1
+
+[SourceDisksNames]
+   1 = %ShaperDisk%,,,""
+
+[SourceDisksFiles]
+   shaper.sys = 1,,
+
+[DestinationDirs]
+    DefaultDestDir     = 12                                               ; %WinDir%\System32\Drivers
+    Shaper.DriverFiles = 12                                               ; %WinDir%\System32\Drivers
+
+[DefaultInstall]
+    OptionDesc = %ShaperServiceDesc%
+    CopyFiles  = Shaper.DriverFiles
+
+[DefaultInstall.Services]
+    AddService = %ShaperServiceName%,,Shaper.Service
+
+[DefaultUninstall]
+    DelFiles = Shaper.DriverFiles
+
+[DefaultUninstall.Services]
+    DelService = %ShaperServiceName%,0x200                                ; SPSVCINST_STOPSERVICE
+    DelReg     = Shaper.DelRegistry
+
+[Shaper.DriverFiles]
+    shaper.sys,,,0x00000040                                               ; COPYFLG_OVERWRITE_OLDER_ONLY
+
+[Shaper.Service]
+    DisplayName   = %ShaperServiceName%
+    Description   = %ShaperServiceDesc%
+    ServiceType   = 1                                                      ; SERVICE_KERNEL_DRIVER
+    StartType     = 3                                                      ; SERVICE_DEMAND_START
+    ErrorControl  = 1                                                      ; SERVICE_ERROR_NORMAL
+    ServiceBinary = %12%\shaper.sys                                        ; %WinDir%\System32\Drivers\Inspect.sys
+    AddReg        = Shaper.AddRegistry
+
+[Shaper.AddRegistry]
+    HKR,"Parameters","rtt",0x00010001,"0"								   ; FLG_ADDREG_TYPE_DWORD
+    HKR,"Parameters","plr",0x00010001,"0"								   ; FLG_ADDREG_TYPE_DWORD
+    HKR,"Parameters","bwIn",0x00010001,"0"								   ; FLG_ADDREG_TYPE_DWORD
+    HKR,"Parameters","bwOut",0x00010001,"0"								   ; FLG_ADDREG_TYPE_DWORD
+
+[Shaper.DelRegistry]
+    HKR,"Parameters",,,
+
+[Strings]
+    ProviderString     = "WebPageTest"
+	ShaperDisk         = "Traffic Shaper Installation Disk"
+    ShaperServiceDesc  = "Traffic Shaper Callout Driver"
+    ShaperServiceName  = "Shaper"
