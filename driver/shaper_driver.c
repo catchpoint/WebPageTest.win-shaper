@@ -49,11 +49,20 @@ DEFINE_GUID(
 /*-----------------------------------------------------------------------------
   Globals
 -----------------------------------------------------------------------------*/
-DEVICE_OBJECT* wdm_device;
-HANDLE engine_handle;
-UINT32 outbound_callout_id, inbound_callout_id;
-
+DEVICE_OBJECT* wdm_device = NULL;
 BOOLEAN driver_unloading = FALSE;
+HANDLE engine_handle = NULL;
+HANDLE injection_handle = NULL;
+UINT32 outbound_callout_id = 0, inbound_callout_id = 0;
+
+// packet queues
+KSPIN_LOCK outbound_list_spinlock = 0;
+KSPIN_LOCK inbound_list_spinlock = 0;
+
+// timer
+WDFTIMER timer_handle = NULL;
+KSPIN_LOCK timer_spinlock = 0;
+BOOLEAN timer_pending = FALSE;
 
 /*-----------------------------------------------------------------------------
   Forward declarations
@@ -64,6 +73,7 @@ NTSTATUS ShaperInitDriverObjects(
     _Out_ WDFDRIVER* pDriver,
     _Out_ WDFDEVICE* pDevice);
 NTSTATUS RegisterCallouts(_Inout_ void* deviceObject);
+void UnregisterCallouts(void);
 
 /******************************************************************************
 ******************************************************************************/
@@ -84,8 +94,31 @@ NTSTATUS DriverEntry(DRIVER_OBJECT* driverObject, UNICODE_STRING* registryPath) 
   status = ShaperInitDriverObjects(driverObject, registryPath, &driver, &device);
   if (NT_SUCCESS(status)) {
     wdm_device = WdfDeviceWdmGetDeviceObject(device);
-    status = RegisterCallouts(wdm_device);
+    status = FwpsInjectionHandleCreate(AF_UNSPEC, FWPS_INJECTION_TYPE_L2, &injection_handle);
   }
+
+  KeInitializeSpinLock(&timer_spinlock);   
+  KeInitializeSpinLock(&outbound_list_spinlock);   
+  KeInitializeSpinLock(&inbound_list_spinlock);   
+
+  if (NT_SUCCESS(status)) {
+    WDF_TIMER_CONFIG timer_config;
+    WDF_OBJECT_ATTRIBUTES timer_attributes;
+    WDF_TIMER_CONFIG_INIT(&timer_config, ShaperTimerEvt);
+    timer_config.Period = 0;
+    timer_config.TolerableDelay = 0;
+    timer_config.AutomaticSerialization = FALSE;
+    timer_config.UseHighResolutionTimer = WdfTrue;
+    WDF_OBJECT_ATTRIBUTES_INIT(&timer_attributes);
+    timer_attributes.ParentObject = device;
+    status = WdfTimerCreate(&timer_config, &timer_attributes, &timer_handle);
+  }
+
+  if (NT_SUCCESS(status))
+    status = RegisterCallouts(wdm_device);
+
+  if (!NT_SUCCESS(status))
+    UnregisterCallouts();
 
   return status;
 };
@@ -93,11 +126,29 @@ NTSTATUS DriverEntry(DRIVER_OBJECT* driverObject, UNICODE_STRING* registryPath) 
 /*-----------------------------------------------------------------------------
 -----------------------------------------------------------------------------*/
 void UnregisterCallouts(void) {
-   FwpmEngineClose(engine_handle);
-   engine_handle = NULL;
+  if (engine_handle) {
+    FwpmEngineClose(engine_handle);
+    engine_handle = NULL;
+  }
 
-   FwpsCalloutUnregisterById(outbound_callout_id);
-   FwpsCalloutUnregisterById(inbound_callout_id);
+  if (outbound_callout_id) {
+    FwpsCalloutUnregisterById(outbound_callout_id);
+    outbound_callout_id = 0;
+  }
+  if (inbound_callout_id) {
+    FwpsCalloutUnregisterById(inbound_callout_id);
+    inbound_callout_id = 0;
+  }
+
+  if (timer_handle) {
+    WdfTimerStop(timer_handle, FALSE);
+    timer_handle = NULL;
+  }
+
+  if (injection_handle) {
+    FwpsInjectionHandleDestroy(injection_handle);
+    injection_handle = NULL;
+  }
 }
 
 /*-----------------------------------------------------------------------------
@@ -202,8 +253,8 @@ NTSTATUS RegisterCallout(
   FWPM_DISPLAY_DATA displayData = {0};
 
   sCallout.calloutKey = *calloutKey;
-  sCallout.classifyFn = is_outbound ? ShaperClassifyOutbound : ShaperClassifyInbound;
-  sCallout.notifyFn = is_outbound ? ShaperNotifyOutbound : ShaperNotifyInbound;
+  sCallout.classifyFn = ShaperClassify;
+  sCallout.notifyFn = ShaperNotify;
 
   status = FwpsCalloutRegister(deviceObject, &sCallout, calloutId);
   if (NT_SUCCESS(status)) {
