@@ -1,21 +1,20 @@
-#include <ntddk.h>
-#include <wdf.h>
+/*
+Copyright 2016 Google Inc. All Rights Reserved.
 
-#pragma warning(push)
-#pragma warning(disable:4201)       // unnamed struct/union
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-#include <fwpsk.h>
-#pragma warning(pop)
-#include <fwpmk.h>
+    http://www.apache.org/licenses/LICENSE-2.0
 
-#include <ws2ipdef.h>
-#include <in6addr.h>
-#include <ip2string.h>
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
-#include "shaper.h"
-
-#define INITGUID
-#include <guiddef.h>
+#include "common.h"
 
 /*-----------------------------------------------------------------------------
   GUIDs
@@ -52,17 +51,15 @@ DEFINE_GUID(
 DEVICE_OBJECT* wdm_device = NULL;
 BOOLEAN driver_unloading = FALSE;
 HANDLE engine_handle = NULL;
-HANDLE injection_handle = NULL;
 UINT32 outbound_callout_id = 0, inbound_callout_id = 0;
 
-// packet queues
-KSPIN_LOCK outbound_list_spinlock = 0;
-KSPIN_LOCK inbound_list_spinlock = 0;
-
-// timer
-WDFTIMER timer_handle = NULL;
-KSPIN_LOCK timer_spinlock = 0;
-BOOLEAN timer_pending = FALSE;
+// packet injection handles for inbound/outbound IPv4/IPv6/Unspecified
+HANDLE ih_out_ipv4 = NULL;
+HANDLE ih_out_ipv6 = NULL;
+HANDLE ih_out_unspecified = NULL;
+HANDLE ih_in_ipv4 = NULL;
+HANDLE ih_in_ipv6 = NULL;
+HANDLE ih_in_unspecified = NULL;
 
 /*-----------------------------------------------------------------------------
   Forward declarations
@@ -73,7 +70,7 @@ NTSTATUS ShaperInitDriverObjects(
     _Out_ WDFDRIVER* pDriver,
     _Out_ WDFDEVICE* pDevice);
 NTSTATUS RegisterCallouts(_Inout_ void* deviceObject);
-void UnregisterCallouts(void);
+void Cleanup(void);
 
 /******************************************************************************
 ******************************************************************************/
@@ -94,38 +91,31 @@ NTSTATUS DriverEntry(DRIVER_OBJECT* driverObject, UNICODE_STRING* registryPath) 
   status = ShaperInitDriverObjects(driverObject, registryPath, &driver, &device);
   if (NT_SUCCESS(status)) {
     wdm_device = WdfDeviceWdmGetDeviceObject(device);
-    status = FwpsInjectionHandleCreate(AF_UNSPEC, FWPS_INJECTION_TYPE_L2, &injection_handle);
+    FwpsInjectionHandleCreate(AF_INET, FWPS_INJECTION_TYPE_L2, &ih_out_ipv4);
+    FwpsInjectionHandleCreate(AF_INET6, FWPS_INJECTION_TYPE_L2, &ih_out_ipv6);
+    FwpsInjectionHandleCreate(AF_UNSPEC, FWPS_INJECTION_TYPE_L2, &ih_out_unspecified);
+    FwpsInjectionHandleCreate(AF_INET, FWPS_INJECTION_TYPE_L2, &ih_in_ipv4);
+    FwpsInjectionHandleCreate(AF_INET6, FWPS_INJECTION_TYPE_L2, &ih_in_ipv6);
+    FwpsInjectionHandleCreate(AF_UNSPEC, FWPS_INJECTION_TYPE_L2, &ih_in_unspecified);
   }
 
-  KeInitializeSpinLock(&timer_spinlock);   
-  KeInitializeSpinLock(&outbound_list_spinlock);   
-  KeInitializeSpinLock(&inbound_list_spinlock);   
-
-  if (NT_SUCCESS(status)) {
-    WDF_TIMER_CONFIG timer_config;
-    WDF_OBJECT_ATTRIBUTES timer_attributes;
-    WDF_TIMER_CONFIG_INIT(&timer_config, ShaperTimerEvt);
-    timer_config.Period = 0;
-    timer_config.TolerableDelay = 0;
-    timer_config.AutomaticSerialization = FALSE;
-    timer_config.UseHighResolutionTimer = WdfTrue;
-    WDF_OBJECT_ATTRIBUTES_INIT(&timer_attributes);
-    timer_attributes.ParentObject = device;
-    status = WdfTimerCreate(&timer_config, &timer_attributes, &timer_handle);
-  }
+  if (NT_SUCCESS(status))
+    status = InitializePacketQueues(device);
 
   if (NT_SUCCESS(status))
     status = RegisterCallouts(wdm_device);
 
   if (!NT_SUCCESS(status))
-    UnregisterCallouts();
+    Cleanup();
 
   return status;
 };
 
 /*-----------------------------------------------------------------------------
 -----------------------------------------------------------------------------*/
-void UnregisterCallouts(void) {
+void Cleanup(void) {
+  DestroyPacketQueues();
+
   if (engine_handle) {
     FwpmEngineClose(engine_handle);
     engine_handle = NULL;
@@ -139,15 +129,29 @@ void UnregisterCallouts(void) {
     FwpsCalloutUnregisterById(inbound_callout_id);
     inbound_callout_id = 0;
   }
-
-  if (timer_handle) {
-    WdfTimerStop(timer_handle, FALSE);
-    timer_handle = NULL;
+  if (ih_out_ipv4) {
+    FwpsInjectionHandleDestroy(ih_out_ipv4);
+    ih_out_ipv4 = NULL;
   }
-
-  if (injection_handle) {
-    FwpsInjectionHandleDestroy(injection_handle);
-    injection_handle = NULL;
+  if (ih_out_ipv6) {
+    FwpsInjectionHandleDestroy(ih_out_ipv6);
+    ih_out_ipv6 = NULL;
+  }
+  if (ih_out_unspecified) {
+    FwpsInjectionHandleDestroy(ih_out_unspecified);
+    ih_out_unspecified = NULL;
+  }
+  if (ih_in_ipv4) {
+    FwpsInjectionHandleDestroy(ih_in_ipv4);
+    ih_in_ipv4 = NULL;
+  }
+  if (ih_in_ipv6) {
+    FwpsInjectionHandleDestroy(ih_in_ipv6);
+    ih_in_ipv6 = NULL;
+  }
+  if (ih_in_unspecified) {
+    FwpsInjectionHandleDestroy(ih_in_unspecified);
+    ih_in_unspecified = NULL;
   }
 }
 
@@ -162,7 +166,7 @@ void ShaperEvtDriverUnload(_In_ WDFDRIVER driverObject) {
   UNREFERENCED_PARAMETER(driverObject);
   driver_unloading = TRUE;
 
-  UnregisterCallouts();
+  Cleanup();
 }
 
 

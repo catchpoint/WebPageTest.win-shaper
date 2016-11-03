@@ -24,18 +24,24 @@
     </Inf>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="shaper.c">
+    <ClCompile Include="packet_queue.c">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="shaper_driver.c">
+    <ClCompile Include="wdm_driver.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="wfp_callout.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="shaper.h">
+    <ClInclude Include="packet_queue.h">
       <Filter>Header Files</Filter>
     </ClInclude>
-    <ClInclude Include="utils.h">
+    <ClInclude Include="common.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="wfp_callout.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

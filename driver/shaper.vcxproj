@@ -251,12 +251,14 @@
     <FilesToPackage Include="$(TargetPath)" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="shaper.c" />
-    <ClCompile Include="shaper_driver.c" />
+    <ClCompile Include="packet_queue.c" />
+    <ClCompile Include="wfp_callout.c" />
+    <ClCompile Include="wdm_driver.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="shaper.h" />
-    <ClInclude Include="utils.h" />
+    <ClInclude Include="common.h" />
+    <ClInclude Include="packet_queue.h" />
+    <ClInclude Include="wfp_callout.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -1,5 +1,6 @@
 #pragma once
 
+// WFP Callout entry points
 void ShaperClassify(
     _In_ const FWPS_INCOMING_VALUES* inFixedValues,
     _In_ const FWPS_INCOMING_METADATA_VALUES* inMetaValues,
@@ -13,5 +14,3 @@ NTSTATUS ShaperNotify(
     _In_ FWPS_CALLOUT_NOTIFY_TYPE notifyType,
     _In_ const GUID* filterKey,
     _Inout_ const FWPS_FILTER* filter);
-
-VOID ShaperTimerEvt(_In_ WDFTIMER Timer);
