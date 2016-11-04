@@ -73,8 +73,6 @@ void ShaperClassify(
         (packet_state != FWPS_PACKET_INJECTED_BY_SELF) && 
         (packet_state != FWPS_PACKET_PREVIOUSLY_INJECTED_BY_SELF)) {
       packet_queued = ShaperQueuePacket(inFixedValues, inMetaValues, layerData, outbound, injection_handle);
-    } else {
-      DbgPrint("[shaper] Ignoring packet\n");
     }
 
     if (packet_queued) {
@@ -82,11 +80,9 @@ void ShaperClassify(
       classifyOut->rights &= ~FWPS_RIGHT_ACTION_WRITE;
       classifyOut->flags |= FWPS_CLASSIFY_OUT_FLAG_ABSORB;
     } else {
-      if (classifyOut->actionType == FWP_ACTION_NONE ||
-          classifyOut->actionType == FWP_ACTION_NONE_NO_MATCH) {
-        // We don't actually make a filtering decision, just pass the buck on
-        classifyOut->actionType = FWP_ACTION_CONTINUE;
-      }
+      classifyOut->actionType = FWP_ACTION_PERMIT;
+      if (filter->flags & FWPS_FILTER_FLAG_CLEAR_ACTION_RIGHT)
+        classifyOut->rights &= ~FWPS_RIGHT_ACTION_WRITE;
     }
   }
 

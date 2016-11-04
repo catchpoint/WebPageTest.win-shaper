@@ -82,10 +82,6 @@ NTSTATUS InitializePacketQueues(WDFDEVICE timer_parent) {
 /*-----------------------------------------------------------------------------
 -----------------------------------------------------------------------------*/
 void FreeQueuedPacket(_Inout_ __drv_freesMem(Mem) QUEUED_PACKET* packet) {
-  if (packet->outbound)
-    DbgPrint("[shaper] Destroying outbound packet 0x%p (IRQL %d)\n", packet, (int)KeGetCurrentIrql());
-  else
-    DbgPrint("[shaper] Destroying inbound packet 0x%p (IRQL %d)\n", packet, (int)KeGetCurrentIrql());
   if (packet->netBufferList != NULL)
     FwpsFreeCloneNetBufferList(packet->netBufferList, 0);
   ExFreePoolWithTag(packet, QUEUED_PACKET_POOL_TAG);
@@ -134,7 +130,6 @@ void PacketInjectionComplete(_Inout_ void* context,
   UNREFERENCED_PARAMETER(netBufferList);  
   UNREFERENCED_PARAMETER(dispatchLevel);  
 
-  DbgPrint("[shaper] PacketInjectionComplete for packet 0x%p\n", packet);
   FreeQueuedPacket(packet);
 }
 
@@ -144,7 +139,7 @@ void PacketInjectionComplete(_Inout_ void* context,
 void ProcessQueue(PACKET_QUEUE *queue) {
   QUEUED_PACKET* packet = NULL;
   KLOCK_QUEUE_HANDLE lock;
-  DbgPrint("[shaper] Processing Queue (IRQL %d)\n", (int)KeGetCurrentIrql());
+  DbgPrint("[shaper] Processing Queue\n");
   do {
     packet = NULL;
 
@@ -257,6 +252,7 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
       packet->interfaceIndex = inFixedValues->incomingValue[ifIndex].value.uint32;
       UINT ndisPort = outbound ? FWPS_FIELD_OUTBOUND_MAC_FRAME_ETHERNET_NDIS_PORT : FWPS_FIELD_INBOUND_MAC_FRAME_ETHERNET_NDIS_PORT;
       packet->NdisPortNumber = inFixedValues->incomingValue[ndisPort].value.uint32;
+
 
       UINT32 bytesRetreated = 0;
       if (!outbound) {
