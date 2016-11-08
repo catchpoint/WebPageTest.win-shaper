@@ -17,5 +17,6 @@
 #define INITGUID
 #include <guiddef.h>
 
+#include "interface.h"
 #include "wfp_callout.h"
 #include "packet_queue.h"

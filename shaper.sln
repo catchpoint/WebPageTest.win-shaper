@@ -5,6 +5,8 @@ VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "shaper", "driver\shaper.vcxproj", "{5D2037F7-4766-4CEB-AA18-1DAFBBB60B7B}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "exe", "exe\exe.vcxproj", "{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -25,6 +27,14 @@ Global
 		{5D2037F7-4766-4CEB-AA18-1DAFBBB60B7B}.Release|x86.ActiveCfg = Release|Win32
 		{5D2037F7-4766-4CEB-AA18-1DAFBBB60B7B}.Release|x86.Build.0 = Release|Win32
 		{5D2037F7-4766-4CEB-AA18-1DAFBBB60B7B}.Release|x86.Deploy.0 = Release|Win32
+		{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}.Debug|x64.ActiveCfg = Debug|x64
+		{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}.Debug|x64.Build.0 = Debug|x64
+		{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}.Debug|x86.ActiveCfg = Debug|Win32
+		{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}.Debug|x86.Build.0 = Debug|Win32
+		{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}.Release|x64.ActiveCfg = Release|x64
+		{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}.Release|x64.Build.0 = Release|x64
+		{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}.Release|x86.ActiveCfg = Release|Win32
+		{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -139,7 +139,6 @@ void PacketInjectionComplete(_Inout_ void* context,
 void ProcessQueue(PACKET_QUEUE *queue) {
   QUEUED_PACKET* packet = NULL;
   KLOCK_QUEUE_HANDLE lock;
-  DbgPrint("[shaper] Processing Queue\n");
   do {
     packet = NULL;
 
@@ -147,15 +146,12 @@ void ProcessQueue(PACKET_QUEUE *queue) {
     if (!IsListEmpty(&queue->packets)) {
       LIST_ENTRY * listEntry = RemoveHeadList(&queue->packets);
       packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
-    } else {
-      DbgPrint("[shaper] queue is empty\n");
     }
     KeReleaseInStackQueuedSpinLock(&lock);
 
     if (packet) {
       NTSTATUS status = STATUS_INSUFFICIENT_RESOURCES;
       if (packet->outbound) {
-        DbgPrint("[shaper] Injecting outbound packet 0x%p\n", packet);
         status = FwpsInjectMacSendAsync(packet->injection_handle,
                                 NULL,
                                 0,
@@ -166,7 +162,6 @@ void ProcessQueue(PACKET_QUEUE *queue) {
                                 PacketInjectionComplete,
                                 packet);
       } else {
-        DbgPrint("[shaper] Injecting inbound packet 0x%p\n", packet);
         status = FwpsInjectMacReceiveAsync(packet->injection_handle,
                                   NULL,
                                   0,
@@ -187,7 +182,6 @@ void ProcessQueue(PACKET_QUEUE *queue) {
 -----------------------------------------------------------------------------*/
 VOID TimerEvt(_In_ WDFTIMER Timer) {
   UNREFERENCED_PARAMETER(Timer);
-  DbgPrint("[shaper] ShaperTimerEvt\n");
  
   // Reset the timer state since it is a one-shot timer
   KLOCK_QUEUE_HANDLE timer_spinlock_handle;
@@ -216,7 +210,7 @@ VOID StartPacketTimerIfNecessary() {
       timer_handle) {
     // for now always set it on a 100ms interval until the configuration is actually hooked up
     timer_pending = TRUE;
-    WdfTimerStart(timer_handle, WDF_REL_TIMEOUT_IN_MS(100));
+    WdfTimerStart(timer_handle, WDF_REL_TIMEOUT_IN_MS(1));
   }
   KeReleaseInStackQueuedSpinLock(&inbound_lock);
   KeReleaseInStackQueuedSpinLock(&outbound_lock);
@@ -273,10 +267,6 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
         NdisAdvanceNetBufferDataStart(NET_BUFFER_LIST_FIRST_NB((NET_BUFFER_LIST*)layerData), bytesRetreated, FALSE, 0);
 
       if (NT_SUCCESS(status)) {
-        if (outbound)
-          DbgPrint("[shaper] Queuing outbound packet 0x%p\n", packet);
-        else
-          DbgPrint("[shaper] Queuing inbound packet 0x%p\n", packet);
         PACKET_QUEUE * queue = outbound ? &outbound_queue: &inbound_queue;
         KLOCK_QUEUE_HANDLE lock;
         KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
