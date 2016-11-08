@@ -12,8 +12,8 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
 BOOLEAN ShaperEnable(_In_ unsigned short plr,
                      _In_ unsigned __int64 inBps,
                      _In_ unsigned __int64 outBps,
-                     _In_ unsigned __int64 inLatency,
-                     _In_ unsigned __int64 outLatency,
+                     _In_ unsigned long inLatency,
+                     _In_ unsigned long outLatency,
                      _In_ unsigned __int64 inBufferBytes,
                      _In_ unsigned __int64 outBufferBytes);
 

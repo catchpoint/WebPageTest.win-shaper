@@ -14,8 +14,8 @@ int main(int argc, char **argv) {
         settings.plr = 0;
         settings.inBps = 5000000;
         settings.outBps = 1000000;
-        settings.inLatency = 14000;
-        settings.outLatency = 14000;
+        settings.inLatency = 14;
+        settings.outLatency = 14;
         settings.inBufferBytes = 150000;
         settings.outBufferBytes = 150000;
         if (DeviceIoControl(shaper, SHAPER_IOCTL_ENABLE, &settings, sizeof(settings), NULL, 0, &bytesReturned, NULL)) {

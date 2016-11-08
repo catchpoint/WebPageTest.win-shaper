@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ntddk.h>
+#include <Ntifs.h>
 #include <wdf.h>
 
 #pragma warning(push)

@@ -50,9 +50,9 @@ typedef struct {
   LIST_ENTRY bandwidth_queue;
   LIST_ENTRY latency_queue;
 
-  unsigned short plr;           // packet loss in 1/100% (0-10000)
+  unsigned short   plr;         // packet loss in 1/100% (0-10000)
   unsigned __int64 bps;         // bandwidth in bits per second
-  unsigned __int64 latency;     // latency in microseconds
+  unsigned long    latency;     // latency in microseconds
   unsigned __int64 bufferBytes; // size of packet buffer in bytes
 
   unsigned __int64 queued_bytes;    // accumulated size of queued packets
@@ -137,12 +137,11 @@ void DropQueue(PACKET_QUEUE *queue) {
 BOOLEAN ShaperEnable(_In_ unsigned short plr,
                      _In_ unsigned __int64 inBps,
                      _In_ unsigned __int64 outBps,
-                     _In_ unsigned __int64 inLatency,
-                     _In_ unsigned __int64 outLatency,
+                     _In_ unsigned long inLatency,
+                     _In_ unsigned long outLatency,
                      _In_ unsigned __int64 inBufferBytes,
                      _In_ unsigned __int64 outBufferBytes) {
   BOOLEAN ret = TRUE;
-  DbgPrint("[shaper] Enabled\n");
   KLOCK_QUEUE_HANDLE lock_handle;
 
   KeAcquireInStackQueuedSpinLock(&inbound_queue.lock, &lock_handle);
@@ -169,7 +168,6 @@ BOOLEAN ShaperEnable(_In_ unsigned short plr,
 -----------------------------------------------------------------------------*/
 BOOLEAN ShaperDisable() {
   BOOLEAN ret = TRUE;
-  DbgPrint("[shaper] Disabled\n");
   KLOCK_QUEUE_HANDLE lock_handle;
   KeAcquireInStackQueuedSpinLock(&queue_lock, &lock_handle);
   traffic_shaping_enabled = FALSE;
@@ -257,7 +255,7 @@ void ProcessQueue(PACKET_QUEUE *queue) {
   if (!IsListEmpty(&queue->bandwidth_queue)) {
     LARGE_INTEGER frequency;
     LARGE_INTEGER now = KeQueryPerformanceCounter(&frequency);
-    unsigned __int64 accumulated = ((queue->last_tick.QuadPart - now.QuadPart) * queue->bps) / (8 * frequency.QuadPart);
+    unsigned __int64 accumulated = ((now.QuadPart - queue->last_tick.QuadPart) * queue->bps) / (8 * frequency.QuadPart);
     queue->available_bytes += accumulated;
   }
 
@@ -288,22 +286,23 @@ void ProcessQueue(PACKET_QUEUE *queue) {
   do {
     packet = NULL;
     KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
-    if (!IsListEmpty(&queue->bandwidth_queue)) {
+    if (!IsListEmpty(&queue->latency_queue)) {
       LARGE_INTEGER frequency;
       LARGE_INTEGER now = KeQueryPerformanceCounter(&frequency);
-      LIST_ENTRY * listEntry = RemoveHeadList(&queue->bandwidth_queue);
+      LIST_ENTRY * listEntry = RemoveHeadList(&queue->latency_queue);
       packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
       if (traffic_shaping_enabled) {
-        unsigned __int64 elapsed_microseconds = ((now.QuadPart - packet->latency_start.QuadPart) * 1000000) / frequency.QuadPart;
-        if (elapsed_microseconds < queue->latency) {
+        unsigned long elapsed_ms = (unsigned long)(((now.QuadPart - packet->latency_start.QuadPart) * 1000) / frequency.QuadPart);
+        if (elapsed_ms < queue->latency) {
           InsertHeadList(&queue->latency_queue, &packet->listEntry);
           packet = NULL;
         }
       }
     }
     KeReleaseInStackQueuedSpinLock(&lock);
-    if (packet)
+    if (packet) {
       InjectPacket(packet);
+    }
   } while (packet);
 }
 
@@ -360,6 +359,17 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
                           _In_ HANDLE injection_handle) {
   BOOLEAN queued = FALSE;
 
+  PACKET_QUEUE * queue = outbound ? &outbound_queue: &inbound_queue;
+  LARGE_INTEGER now = KeQueryPerformanceCounter(NULL);
+
+  // see if we need to drop the packet because of plr
+  if (traffic_shaping_enabled && queue->plr > 0) {
+    // plr range is 0-10000, grab a random number capped to that range and compare
+    ULONG random = RtlRandomEx(&now.LowPart) % 10000;
+    if (random < queue->plr)
+      return TRUE;
+  }
+
   // clone the packet and add it to the appropriate queue
   QUEUED_PACKET* packet = NULL;
   if (traffic_shaping_enabled && layerData) {
@@ -391,6 +401,7 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
       NTSTATUS status = STATUS_SUCCESS;
 
       // Clone the buffer
+      packet->packet_length = NET_BUFFER_DATA_LENGTH(NET_BUFFER_LIST_FIRST_NB((NET_BUFFER_LIST*)layerData));
       if (bytesRetreated)
         status = NdisRetreatNetBufferDataStart(NET_BUFFER_LIST_FIRST_NB((NET_BUFFER_LIST*)layerData), bytesRetreated, 0, 0);
       if (NT_SUCCESS(status))
@@ -399,12 +410,11 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
         NdisAdvanceNetBufferDataStart(NET_BUFFER_LIST_FIRST_NB((NET_BUFFER_LIST*)layerData), bytesRetreated, FALSE, 0);
 
       if (NT_SUCCESS(status)) {
-        PACKET_QUEUE * queue = outbound ? &outbound_queue: &inbound_queue;
         KLOCK_QUEUE_HANDLE lock;
         KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
         if (IsListEmpty(&queue->bandwidth_queue)) {
           queue->available_bytes = 0;
-          queue->last_tick = KeQueryPerformanceCounter(NULL);
+          queue->last_tick = now;
         }
         InsertTailList(&queue->bandwidth_queue, &packet->listEntry);
         packet = NULL;
