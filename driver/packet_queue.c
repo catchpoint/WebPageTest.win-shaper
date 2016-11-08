@@ -22,20 +22,15 @@ WDFTIMER timer_handle = NULL;
 KSPIN_LOCK timer_spinlock = 0;
 BOOLEAN timer_pending = FALSE;
 
-// packet queues
-static BOOLEAN queues_initialized = FALSE;
-static KSPIN_LOCK queue_lock = 0;
-PACKET_QUEUE inbound_queue;
-PACKET_QUEUE outbound_queue;
-
-//
 // QUEUED_PACKET is the object type we used to store all information
 // needed for out-of-band packet re-injection. This type
 // also points back to the flow context the packet belongs to.
 typedef struct {
-   LIST_ENTRY listEntry;
-   HANDLE injection_handle;
-   BOOLEAN outbound;
+   LIST_ENTRY     listEntry;
+   HANDLE         injection_handle;
+   BOOLEAN        outbound;
+   unsigned long  packet_length;  // Size of the packet (in bytes)
+   LARGE_INTEGER  latency_start;  // time it was placed in the latency queue
 
    // Data fields for packet re-injection.
    UINT16 layerId;
@@ -44,9 +39,39 @@ typedef struct {
    NET_BUFFER_LIST *netBufferList;
 } QUEUED_PACKET;
 
+// packet queues
+// All packets are first buffered into the bandwidth queue and released
+// at the appropriate rate for the configured bandwidth into the latency queue.
+// When they are added to the latency queue they are timestamped when they
+// entered and they are released when the appropriate latency has expired.
+// Only the bandwidth queue is affected by the queue buffer size.  The latency
+// queue has no limit.
+typedef struct {
+  LIST_ENTRY bandwidth_queue;
+  LIST_ENTRY latency_queue;
+
+  unsigned short plr;           // packet loss in 1/100% (0-10000)
+  unsigned __int64 bps;         // bandwidth in bits per second
+  unsigned __int64 latency;     // latency in microseconds
+  unsigned __int64 bufferBytes; // size of packet buffer in bytes
+
+  unsigned __int64 queued_bytes;    // accumulated size of queued packets
+  unsigned __int64 available_bytes; // accumulated bytes available for sending
+  LARGE_INTEGER last_tick;          // performance counter timestamp of the last time the queue was checked
+  KSPIN_LOCK lock;
+} PACKET_QUEUE;
+
+static BOOLEAN queues_initialized = FALSE;
+static KSPIN_LOCK queue_lock = 0;
+PACKET_QUEUE inbound_queue;
+PACKET_QUEUE outbound_queue;
+
+static BOOLEAN traffic_shaping_enabled = FALSE;
+
 // Forward declarations
 VOID TimerEvt(_In_ WDFTIMER Timer);
 VOID StartPacketTimerIfNecessary();
+void ProcessQueue(PACKET_QUEUE *queue);
 
 /*-----------------------------------------------------------------------------
 -----------------------------------------------------------------------------*/
@@ -59,9 +84,11 @@ NTSTATUS InitializePacketQueues(WDFDEVICE timer_parent) {
 
   KeInitializeSpinLock(&timer_spinlock);   
   KeInitializeSpinLock(&inbound_queue.lock);
-  InitializeListHead(&inbound_queue.packets);
+  InitializeListHead(&inbound_queue.bandwidth_queue);
+  InitializeListHead(&inbound_queue.latency_queue);
   KeInitializeSpinLock(&outbound_queue.lock);   
-  InitializeListHead(&outbound_queue.packets);
+  InitializeListHead(&outbound_queue.bandwidth_queue);
+  InitializeListHead(&outbound_queue.latency_queue);
 
   // Create the timer that will be used to process the queues
   WDF_TIMER_CONFIG timer_config;
@@ -89,15 +116,67 @@ void FreeQueuedPacket(_Inout_ __drv_freesMem(Mem) QUEUED_PACKET* packet) {
 
 /*-----------------------------------------------------------------------------
 -----------------------------------------------------------------------------*/
-void DrainQueue(PACKET_QUEUE *queue) {
+void DropQueue(PACKET_QUEUE *queue) {
   KLOCK_QUEUE_HANDLE lock;
   KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
-  while (!IsListEmpty(&queue->packets)) {
-    LIST_ENTRY * listEntry = RemoveHeadList(&queue->packets);
+  while (!IsListEmpty(&queue->latency_queue)) {
+    LIST_ENTRY * listEntry = RemoveHeadList(&queue->latency_queue);
+    QUEUED_PACKET *packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
+    FreeQueuedPacket(packet);
+  }
+  while (!IsListEmpty(&queue->bandwidth_queue)) {
+    LIST_ENTRY * listEntry = RemoveHeadList(&queue->bandwidth_queue);
     QUEUED_PACKET *packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
     FreeQueuedPacket(packet);
   }
   KeReleaseInStackQueuedSpinLock(&lock);
+}
+
+/*-----------------------------------------------------------------------------
+-----------------------------------------------------------------------------*/
+BOOLEAN ShaperEnable(_In_ unsigned short plr,
+                     _In_ unsigned __int64 inBps,
+                     _In_ unsigned __int64 outBps,
+                     _In_ unsigned __int64 inLatency,
+                     _In_ unsigned __int64 outLatency,
+                     _In_ unsigned __int64 inBufferBytes,
+                     _In_ unsigned __int64 outBufferBytes) {
+  BOOLEAN ret = TRUE;
+  DbgPrint("[shaper] Enabled\n");
+  KLOCK_QUEUE_HANDLE lock_handle;
+
+  KeAcquireInStackQueuedSpinLock(&inbound_queue.lock, &lock_handle);
+  inbound_queue.plr = plr;
+  inbound_queue.bps = inBps;
+  inbound_queue.latency = inLatency;
+  inbound_queue.bufferBytes = inBufferBytes;
+  KeReleaseInStackQueuedSpinLock(&lock_handle);
+
+  KeAcquireInStackQueuedSpinLock(&outbound_queue.lock, &lock_handle);
+  outbound_queue.plr = plr;
+  outbound_queue.bps = outBps;
+  outbound_queue.latency = outLatency;
+  outbound_queue.bufferBytes = outBufferBytes;
+  KeReleaseInStackQueuedSpinLock(&lock_handle);
+
+  KeAcquireInStackQueuedSpinLock(&queue_lock, &lock_handle);
+  traffic_shaping_enabled = TRUE;
+  KeReleaseInStackQueuedSpinLock(&lock_handle);
+  return ret;
+}
+
+/*-----------------------------------------------------------------------------
+-----------------------------------------------------------------------------*/
+BOOLEAN ShaperDisable() {
+  BOOLEAN ret = TRUE;
+  DbgPrint("[shaper] Disabled\n");
+  KLOCK_QUEUE_HANDLE lock_handle;
+  KeAcquireInStackQueuedSpinLock(&queue_lock, &lock_handle);
+  traffic_shaping_enabled = FALSE;
+  KeReleaseInStackQueuedSpinLock(&lock_handle);
+  ProcessQueue(&outbound_queue);
+  ProcessQueue(&inbound_queue);
+  return ret;
 }
 
 /*-----------------------------------------------------------------------------
@@ -107,8 +186,8 @@ void DestroyPacketQueues() {
     KLOCK_QUEUE_HANDLE lock_handle;
     KeAcquireInStackQueuedSpinLock(&queue_lock, &lock_handle);
     if (queues_initialized) {
-      DrainQueue(&inbound_queue);
-      DrainQueue(&outbound_queue);
+      DropQueue(&inbound_queue);
+      DropQueue(&outbound_queue);
     }
     queues_initialized = FALSE;
 
@@ -134,25 +213,22 @@ void PacketInjectionComplete(_Inout_ void* context,
 }
 
 /*-----------------------------------------------------------------------------
-  Inject any packets that are due (for now, all of them)
 -----------------------------------------------------------------------------*/
-void ProcessQueue(PACKET_QUEUE *queue) {
-  QUEUED_PACKET* packet = NULL;
-  KLOCK_QUEUE_HANDLE lock;
-  do {
-    packet = NULL;
-
-    KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
-    if (!IsListEmpty(&queue->packets)) {
-      LIST_ENTRY * listEntry = RemoveHeadList(&queue->packets);
-      packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
-    }
-    KeReleaseInStackQueuedSpinLock(&lock);
-
-    if (packet) {
-      NTSTATUS status = STATUS_INSUFFICIENT_RESOURCES;
-      if (packet->outbound) {
-        status = FwpsInjectMacSendAsync(packet->injection_handle,
+void InjectPacket(QUEUED_PACKET *packet) {
+  if (packet) {
+    NTSTATUS status = STATUS_INSUFFICIENT_RESOURCES;
+    if (packet->outbound) {
+      status = FwpsInjectMacSendAsync(packet->injection_handle,
+                              NULL,
+                              0,
+                              packet->layerId,
+                              packet->interfaceIndex,
+                              packet->NdisPortNumber,
+                              packet->netBufferList,
+                              PacketInjectionComplete,
+                              packet);
+    } else {
+      status = FwpsInjectMacReceiveAsync(packet->injection_handle,
                                 NULL,
                                 0,
                                 packet->layerId,
@@ -161,20 +237,73 @@ void ProcessQueue(PACKET_QUEUE *queue) {
                                 packet->netBufferList,
                                 PacketInjectionComplete,
                                 packet);
-      } else {
-        status = FwpsInjectMacReceiveAsync(packet->injection_handle,
-                                  NULL,
-                                  0,
-                                  packet->layerId,
-                                  packet->interfaceIndex,
-                                  packet->NdisPortNumber,
-                                  packet->netBufferList,
-                                  PacketInjectionComplete,
-                                  packet);
-      }
-      if (!NT_SUCCESS(status))
-        FreeQueuedPacket(packet);
     }
+    if (!NT_SUCCESS(status))
+      FreeQueuedPacket(packet);
+  }
+}
+
+/*-----------------------------------------------------------------------------
+  Inject any packets that are due (for now, all of them)
+-----------------------------------------------------------------------------*/
+void ProcessQueue(PACKET_QUEUE *queue) {
+  QUEUED_PACKET* packet = NULL;
+  KLOCK_QUEUE_HANDLE lock;
+
+  // process the bandwidth queue
+
+  // Increment the available bytes if there is something in the queue
+  KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
+  if (!IsListEmpty(&queue->bandwidth_queue)) {
+    LARGE_INTEGER frequency;
+    LARGE_INTEGER now = KeQueryPerformanceCounter(&frequency);
+    unsigned __int64 accumulated = ((queue->last_tick.QuadPart - now.QuadPart) * queue->bps) / (8 * frequency.QuadPart);
+    queue->available_bytes += accumulated;
+  }
+
+  // Move as many packets to the latency queue as the accumulated available bytes will allow
+  do {
+    packet = NULL;
+    if (!IsListEmpty(&queue->bandwidth_queue)) {
+      LIST_ENTRY * listEntry = RemoveHeadList(&queue->bandwidth_queue);
+      packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
+      if (!traffic_shaping_enabled || packet->packet_length <= queue->available_bytes) {
+        queue->available_bytes -= packet->packet_length;
+        packet->latency_start = KeQueryPerformanceCounter(NULL);
+        InsertTailList(&queue->latency_queue, &packet->listEntry);
+      } else {
+        InsertHeadList(&queue->bandwidth_queue, &packet->listEntry);
+        packet = NULL;
+      }
+    }
+  } while (packet);
+
+  // Reset the byte accumulation if the bandwidth queue is empty
+  if (IsListEmpty(&queue->bandwidth_queue))
+    queue->available_bytes = 0;
+  queue->last_tick = KeQueryPerformanceCounter(NULL);
+  KeReleaseInStackQueuedSpinLock(&lock);
+
+  // process the latency queue
+  do {
+    packet = NULL;
+    KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
+    if (!IsListEmpty(&queue->bandwidth_queue)) {
+      LARGE_INTEGER frequency;
+      LARGE_INTEGER now = KeQueryPerformanceCounter(&frequency);
+      LIST_ENTRY * listEntry = RemoveHeadList(&queue->bandwidth_queue);
+      packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
+      if (traffic_shaping_enabled) {
+        unsigned __int64 elapsed_microseconds = ((now.QuadPart - packet->latency_start.QuadPart) * 1000000) / frequency.QuadPart;
+        if (elapsed_microseconds < queue->latency) {
+          InsertHeadList(&queue->latency_queue, &packet->listEntry);
+          packet = NULL;
+        }
+      }
+    }
+    KeReleaseInStackQueuedSpinLock(&lock);
+    if (packet)
+      InjectPacket(packet);
   } while (packet);
 }
 
@@ -206,9 +335,12 @@ VOID StartPacketTimerIfNecessary() {
   KeAcquireInStackQueuedSpinLock(&outbound_queue.lock, &outbound_lock);
   KeAcquireInStackQueuedSpinLock(&inbound_queue.lock, &inbound_lock);
   if (!timer_pending &&
-      (!IsListEmpty(&inbound_queue.packets) || !IsListEmpty(&outbound_queue.packets)) &&
+      (!IsListEmpty(&inbound_queue.bandwidth_queue) ||
+       !IsListEmpty(&outbound_queue.bandwidth_queue) ||
+       !IsListEmpty(&inbound_queue.latency_queue) ||
+       !IsListEmpty(&outbound_queue.latency_queue)) &&
       timer_handle) {
-    // for now always set it on a 100ms interval until the configuration is actually hooked up
+    // Set a 1ms tick rate as long as there are packets in one of the queues
     timer_pending = TRUE;
     WdfTimerStart(timer_handle, WDF_REL_TIMEOUT_IN_MS(1));
   }
@@ -230,7 +362,7 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
 
   // clone the packet and add it to the appropriate queue
   QUEUED_PACKET* packet = NULL;
-  if (layerData) {
+  if (traffic_shaping_enabled && layerData) {
     packet = ExAllocatePoolWithTag(
                           NonPagedPool,
                           sizeof(QUEUED_PACKET),
@@ -270,12 +402,17 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
         PACKET_QUEUE * queue = outbound ? &outbound_queue: &inbound_queue;
         KLOCK_QUEUE_HANDLE lock;
         KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
-        InsertTailList(&queue->packets, &packet->listEntry);
+        if (IsListEmpty(&queue->bandwidth_queue)) {
+          queue->available_bytes = 0;
+          queue->last_tick = KeQueryPerformanceCounter(NULL);
+        }
+        InsertTailList(&queue->bandwidth_queue, &packet->listEntry);
         packet = NULL;
         KeReleaseInStackQueuedSpinLock(&lock);
         queued = TRUE;
 
         // Start the timer to process the packet queue if it isn't already running
+        ProcessQueue(queue);
         StartPacketTimerIfNecessary();
       }
     }

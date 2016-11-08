@@ -1,13 +1,5 @@
 #pragma once
 
-typedef struct {
-  LIST_ENTRY packets;
-  KSPIN_LOCK lock;
-} PACKET_QUEUE;
-
-extern PACKET_QUEUE inbound_queue;
-extern PACKET_QUEUE outbound_queue;
-
 NTSTATUS InitializePacketQueues(WDFDEVICE timer_parent);
 void DestroyPacketQueues();
 
@@ -16,3 +8,13 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
                           _Inout_opt_ void* layerData,
                           BOOLEAN outbound,
                           _In_ HANDLE injection_handle);
+
+BOOLEAN ShaperEnable(_In_ unsigned short plr,
+                     _In_ unsigned __int64 inBps,
+                     _In_ unsigned __int64 outBps,
+                     _In_ unsigned __int64 inLatency,
+                     _In_ unsigned __int64 outLatency,
+                     _In_ unsigned __int64 inBufferBytes,
+                     _In_ unsigned __int64 outBufferBytes);
+
+BOOLEAN ShaperDisable();

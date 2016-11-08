@@ -180,17 +180,30 @@ VOID EvtDeviceIOCtl(_In_ WDFQUEUE Queue,
   NTSTATUS status = STATUS_SUCCESS;
   switch (IoControlCode) {
     case SHAPER_IOCTL_DISABLE: {
-      DbgPrint("[shaper] SHAPER_IOCTL_DISABLE\n");
+      if (!ShaperDisable())
+        status = STATUS_INVALID_PARAMETER;
       break;
     }
     case SHAPER_IOCTL_ENABLE: {
-      DbgPrint("[shaper] SHAPER_IOCTL_ENABLE - %lu bytes\n", (DWORD)InputBufferLength);
       if (InputBufferLength >= sizeof(SHAPER_PARAMS)) {
         WDFMEMORY pMemory;
-        void* pBuffer;
+        SHAPER_PARAMS* settings;
         status = WdfRequestRetrieveInputMemory(Request, &pMemory);
         if (NT_SUCCESS(status)) {
-          pBuffer = WdfMemoryGetBuffer(pMemory, NULL);
+          settings = (SHAPER_PARAMS *)WdfMemoryGetBuffer(pMemory, NULL);
+          if (settings) {
+            if (!ShaperEnable(settings->plr,
+                              settings->inBps,
+                              settings->outBps,
+                              settings->inLatency,
+                              settings->outLatency,
+                              settings->inBufferBytes,
+                              settings->outBufferBytes)) {
+              status = STATUS_INVALID_PARAMETER;
+            }
+          } else {
+            status = STATUS_INVALID_PARAMETER;
+          }
         }
       } else {
         status = STATUS_INVALID_PARAMETER;

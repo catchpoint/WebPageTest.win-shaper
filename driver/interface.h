@@ -6,10 +6,13 @@
 
 #pragma pack(push, 8)
 typedef struct {
-  double              plr;
-  unsigned __int64    inBps;
-  unsigned __int64    outBps;
-  unsigned long       rtt;
+  unsigned short   plr;            // Packet loss rate in hundreths of % (0-10000, i.e. 10% packet loss = 1000)
+  unsigned __int64 inBps;          // Inbound bandwidth in bits-per-second
+  unsigned __int64 outBps;         // Outbound bandwidth in bits-per-second
+  unsigned __int64 inLatency;      // Inbound latency in microseconds (1/1000 ms)
+  unsigned __int64 outLatency;     // Outbound latency in microseconds (1/1000 ms)
+  unsigned __int64 inBufferBytes;  // Size of inbound packet buffer in bytes (drop packets that overflow). 150,000 Matches the dummynet default
+  unsigned __int64 outBufferBytes; // Size of outbound packet buffer in bytes (drop packets that overflow). 150,000 Matches the dummynet default
 } SHAPER_PARAMS;
 #pragma pack(pop)
 
