@@ -73,6 +73,8 @@ VOID TimerEvt(_In_ WDFTIMER Timer);
 VOID StartPacketTimerIfNecessary();
 void ProcessQueue(PACKET_QUEUE *queue);
 
+#define INITIAL_TOKEN_COUNT 1500
+
 /*-----------------------------------------------------------------------------
 -----------------------------------------------------------------------------*/
 NTSTATUS InitializePacketQueues(WDFDEVICE timer_parent) {
@@ -149,6 +151,9 @@ BOOLEAN ShaperEnable(_In_ unsigned short plr,
   inbound_queue.bps = inBps;
   inbound_queue.latency = inLatency;
   inbound_queue.bufferBytes = inBufferBytes;
+  inbound_queue.queued_bytes = 0;
+  inbound_queue.available_bytes = INITIAL_TOKEN_COUNT;
+  inbound_queue.last_tick = KeQueryPerformanceCounter(NULL);
   KeReleaseInStackQueuedSpinLock(&lock_handle);
 
   KeAcquireInStackQueuedSpinLock(&outbound_queue.lock, &lock_handle);
@@ -156,6 +161,9 @@ BOOLEAN ShaperEnable(_In_ unsigned short plr,
   outbound_queue.bps = outBps;
   outbound_queue.latency = outLatency;
   outbound_queue.bufferBytes = outBufferBytes;
+  outbound_queue.queued_bytes = 0;
+  outbound_queue.available_bytes = INITIAL_TOKEN_COUNT;
+  outbound_queue.last_tick = inbound_queue.last_tick;
   KeReleaseInStackQueuedSpinLock(&lock_handle);
 
   KeAcquireInStackQueuedSpinLock(&queue_lock, &lock_handle);
@@ -252,12 +260,12 @@ void ProcessQueue(PACKET_QUEUE *queue) {
 
   // Increment the available bytes if there is something in the queue
   KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
-  if (!IsListEmpty(&queue->bandwidth_queue)) {
-    LARGE_INTEGER frequency;
-    LARGE_INTEGER now = KeQueryPerformanceCounter(&frequency);
-    unsigned __int64 accumulated = ((now.QuadPart - queue->last_tick.QuadPart) * queue->bps) / (8 * frequency.QuadPart);
-    queue->available_bytes += accumulated;
-  }
+  LARGE_INTEGER frequency;
+  LARGE_INTEGER now = KeQueryPerformanceCounter(&frequency);
+  unsigned __int64 accumulated = ((now.QuadPart - queue->last_tick.QuadPart) * queue->bps) / (8 * frequency.QuadPart);
+  queue->available_bytes += accumulated;
+  if (IsListEmpty(&queue->bandwidth_queue) && queue->available_bytes > INITIAL_TOKEN_COUNT)
+    queue->available_bytes = INITIAL_TOKEN_COUNT;
 
   // Move as many packets to the latency queue as the accumulated available bytes will allow
   do {
@@ -267,6 +275,7 @@ void ProcessQueue(PACKET_QUEUE *queue) {
       packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
       if (!traffic_shaping_enabled || packet->packet_length <= queue->available_bytes) {
         queue->available_bytes -= packet->packet_length;
+        queue->queued_bytes -= packet->packet_length;
         packet->latency_start = KeQueryPerformanceCounter(NULL);
         InsertTailList(&queue->latency_queue, &packet->listEntry);
       } else {
@@ -277,8 +286,6 @@ void ProcessQueue(PACKET_QUEUE *queue) {
   } while (packet);
 
   // Reset the byte accumulation if the bandwidth queue is empty
-  if (IsListEmpty(&queue->bandwidth_queue))
-    queue->available_bytes = 0;
   queue->last_tick = KeQueryPerformanceCounter(NULL);
   KeReleaseInStackQueuedSpinLock(&lock);
 
@@ -287,12 +294,13 @@ void ProcessQueue(PACKET_QUEUE *queue) {
     packet = NULL;
     KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
     if (!IsListEmpty(&queue->latency_queue)) {
-      LARGE_INTEGER frequency;
-      LARGE_INTEGER now = KeQueryPerformanceCounter(&frequency);
+      now = KeQueryPerformanceCounter(&frequency);
       LIST_ENTRY * listEntry = RemoveHeadList(&queue->latency_queue);
       packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
       if (traffic_shaping_enabled) {
-        unsigned long elapsed_ms = (unsigned long)(((now.QuadPart - packet->latency_start.QuadPart) * 1000) / frequency.QuadPart);
+        // round to the closest ms instead of truncating by adding 1/2 of a ms to the elapsed ticks
+        unsigned __int64 round = frequency.QuadPart / 2000LL;
+        unsigned long elapsed_ms = (unsigned long)(((now.QuadPart - packet->latency_start.QuadPart) * 1000 + round) / frequency.QuadPart);
         if (elapsed_ms < queue->latency) {
           InsertHeadList(&queue->latency_queue, &packet->listEntry);
           packet = NULL;
@@ -370,6 +378,11 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
       return TRUE;
   }
 
+  // see if we need to drop the packet because the buffer is "full"
+  unsigned long packet_length = NET_BUFFER_DATA_LENGTH(NET_BUFFER_LIST_FIRST_NB((NET_BUFFER_LIST*)layerData));
+  if (traffic_shaping_enabled && queue->bufferBytes > 0 && queue->queued_bytes + packet_length > queue->bufferBytes)
+    return TRUE;
+
   // clone the packet and add it to the appropriate queue
   QUEUED_PACKET* packet = NULL;
   if (traffic_shaping_enabled && layerData) {
@@ -400,7 +413,7 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
       NTSTATUS status = STATUS_SUCCESS;
 
       // Clone the buffer
-      packet->packet_length = NET_BUFFER_DATA_LENGTH(NET_BUFFER_LIST_FIRST_NB((NET_BUFFER_LIST*)layerData));
+      packet->packet_length = packet_length;
       if (bytesRetreated)
         status = NdisRetreatNetBufferDataStart(NET_BUFFER_LIST_FIRST_NB((NET_BUFFER_LIST*)layerData), bytesRetreated, 0, 0);
       if (NT_SUCCESS(status))
@@ -411,13 +424,10 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
       if (NT_SUCCESS(status)) {
         KLOCK_QUEUE_HANDLE lock;
         KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
-        if (IsListEmpty(&queue->bandwidth_queue)) {
-          queue->available_bytes = 0;
-          queue->last_tick = now;
-        }
+        queue->queued_bytes += packet_length;
         InsertTailList(&queue->bandwidth_queue, &packet->listEntry);
-        packet = NULL;
         KeReleaseInStackQueuedSpinLock(&lock);
+        packet = NULL;
         queued = TRUE;
 
         // Start the timer to process the packet queue if it isn't already running
