@@ -389,7 +389,6 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
       UINT ndisPort = outbound ? FWPS_FIELD_OUTBOUND_MAC_FRAME_ETHERNET_NDIS_PORT : FWPS_FIELD_INBOUND_MAC_FRAME_ETHERNET_NDIS_PORT;
       packet->NdisPortNumber = inFixedValues->incomingValue[ndisPort].value.uint32;
 
-
       UINT32 bytesRetreated = 0;
       if (!outbound) {
         UINT32 ethernetHeaderSize = 0;

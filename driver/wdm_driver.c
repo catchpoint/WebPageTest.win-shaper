@@ -79,14 +79,14 @@ void Cleanup(void);
   Main driver entry point
 -----------------------------------------------------------------------------*/
 NTSTATUS DriverEntry(DRIVER_OBJECT* driverObject, UNICODE_STRING* registryPath) {
-  NTSTATUS status;
-  WDFDRIVER driver;
-  WDFDEVICE device;
+  NTSTATUS status = STATUS_SUCCESS;
+  WDFDRIVER driver = NULL;
+  WDFDEVICE device = NULL;
 
   // Request NX Non-Paged Pool when available
   ExInitializeDriverRuntime(DrvRtPoolNxOptIn);
-
   status = ShaperInitDriverObjects(driverObject, registryPath, &driver, &device);
+
   if (NT_SUCCESS(status)) {
     FwpsInjectionHandleCreate(AF_INET, FWPS_INJECTION_TYPE_L2, &ih_out_ipv4);
     FwpsInjectionHandleCreate(AF_INET6, FWPS_INJECTION_TYPE_L2, &ih_out_ipv6);
