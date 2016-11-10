@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <tchar.h>
 #include <Windows.h>
+#include <Shlwapi.h>
 
 #include "../driver/interface.h"
 
@@ -132,6 +133,64 @@ void Disable() {
   }
 }
 
+void Install() {
+  SC_HANDLE scm = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS); 
+  if (scm) {
+    SC_HANDLE service = OpenService(scm, SHAPER_SERVICE_NAME, SERVICE_ALL_ACCESS); 
+    if (!service) {
+      TCHAR driver_path[MAX_PATH];
+      GetModuleFileName(NULL, driver_path, MAX_PATH);
+      lstrcpy(PathFindFileName(driver_path), _T("shaper.sys"));
+      service = CreateService(scm,
+                              SHAPER_SERVICE_NAME,
+                              SHAPER_SERVICE_DISPLAY_NAME,
+                              SERVICE_ALL_ACCESS,
+                              SERVICE_KERNEL_DRIVER,
+                              SERVICE_DEMAND_START,
+                              SERVICE_ERROR_NORMAL,
+                              driver_path,
+                              NULL,
+                              NULL,
+                              NULL,
+                              NULL,
+                              NULL);
+      if (service) {
+        CloseServiceHandle(service);
+        printf("Shaper driver installed\n");
+      } else {
+        printf("Failed to install shaper driver\n");
+      }
+    } else {
+      CloseServiceHandle(service);
+      printf("Shaper is already installed\n");
+    }
+    CloseServiceHandle(scm);
+  } else {
+    printf("Failed to open the Service Control Manager\n");
+  }
+}
+
+void Uninstall() {
+  Stop();
+  SC_HANDLE scm = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS); 
+  if (scm) {
+    SC_HANDLE service = OpenService(scm, SHAPER_SERVICE_NAME, SERVICE_ALL_ACCESS); 
+    if (service) {
+      if (DeleteService(service)) {
+        printf("Driver uninstalled\n");
+      } else {
+        printf("DeleteService failed\n");
+      }
+      CloseServiceHandle(service);
+    } else {
+      printf("Failed to open the shaper service\n");
+    }
+    CloseServiceHandle(scm);
+  } else {
+    printf("Failed to open the Service Control Manager\n");
+  }
+}
+
 int main(int argc, char **argv) {
   if (argc > 1) {
     DWORD bytesReturned = 0;
@@ -143,10 +202,14 @@ int main(int argc, char **argv) {
       Enable();
     else if (!lstrcmpiA(argv[1], "off"))
       Disable();
+    else if (!lstrcmpiA(argv[1], "install"))
+      Install();
+    else if (!lstrcmpiA(argv[1], "uninstall"))
+      Uninstall();
     else
-      printf("Usage: shaper [install|uninstall|start|stop|autostart|demandstart|on|off]\n");
+      printf("Usage: shaper [install|uninstall|start|stop|on|off]\n");
   } else {
-    printf("Usage: shaper [install|uninstall|start|stop|autostart|demandstart|on|off]\n");
+    printf("Usage: shaper [install|uninstall|start|stop|on|off]\n");
   }
   return 0;
 }

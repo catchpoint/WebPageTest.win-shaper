@@ -194,6 +194,9 @@
       <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\ndis.lib;$(DDK_LIB_PATH)\wdmsec.lib;$(DDK_LIB_PATH)\fwpkclnt.lib;$(SDK_LIB_PATH)\uuid.lib</AdditionalDependencies>
       <Version>1.0</Version>
     </Link>
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -222,6 +225,9 @@
       <AdditionalDependencies>%(AdditionalDependencies);$(DDK_LIB_PATH)\ndis.lib;$(DDK_LIB_PATH)\wdmsec.lib;$(DDK_LIB_PATH)\fwpkclnt.lib;$(SDK_LIB_PATH)\uuid.lib</AdditionalDependencies>
       <Version>1.0</Version>
     </Link>
+    <DriverSign>
+      <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
+    </DriverSign>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <ClCompile>

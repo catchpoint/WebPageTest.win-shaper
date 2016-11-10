@@ -157,9 +157,6 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <Text Include="ReadMe.txt" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
