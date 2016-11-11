@@ -1,4 +1,5 @@
 #pragma once
+#include "interface.h"
 
 NTSTATUS InitializePacketQueues(WDFDEVICE timer_parent);
 void DestroyPacketQueues();
@@ -18,3 +19,4 @@ BOOLEAN ShaperEnable(_In_ unsigned short plr,
                      _In_ unsigned __int64 outBufferBytes);
 
 BOOLEAN ShaperDisable();
+void ShaperGetStatus(SHAPER_STATUS *status);

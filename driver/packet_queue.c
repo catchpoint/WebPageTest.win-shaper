@@ -443,3 +443,18 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
   return queued;
 }
 
+/*-----------------------------------------------------------------------------
+-----------------------------------------------------------------------------*/
+void ShaperGetStatus(SHAPER_STATUS *status) {
+  // Don't bother locking to read the values out
+  status->enabled = traffic_shaping_enabled;
+  status->params.inBps = inbound_queue.bps;
+  status->params.outBps = outbound_queue.bps;
+  status->params.inLatency = inbound_queue.latency;
+  status->params.outLatency = outbound_queue.latency;
+  status->params.plr = inbound_queue.plr;
+  status->params.inBufferBytes = inbound_queue.bufferBytes;
+  status->params.outBufferBytes = outbound_queue.bufferBytes;
+  status->inQueuedBytes = inbound_queue.queued_bytes;
+  status->outQueuedBytes = outbound_queue.queued_bytes;
+}
