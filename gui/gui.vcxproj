@@ -186,9 +186,6 @@
     </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <Text Include="ReadMe.txt" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="CustomProfileDlg.h" />
     <ClInclude Include="CustomProfiles.h" />
     <ClInclude Include="CustomProfilesDlg.h" />
