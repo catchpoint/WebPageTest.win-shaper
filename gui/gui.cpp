@@ -22,6 +22,8 @@ END_MESSAGE_MAP()
 
 CWinShaperApp::CWinShaperApp()
 {
+  SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32);
+
 	// support Restart Manager
 	m_dwRestartManagerSupportFlags = AFX_RESTART_MANAGER_SUPPORT_RESTART;
 
