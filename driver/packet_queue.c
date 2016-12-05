@@ -68,6 +68,11 @@ PACKET_QUEUE outbound_queue;
 
 static BOOLEAN traffic_shaping_enabled = FALSE;
 
+unsigned __int64 inBytes = 0;
+unsigned __int64 inPackets = 0;
+unsigned __int64 outBytes = 0;
+unsigned __int64 outPackets = 0;
+
 // Forward declarations
 VOID TimerEvt(_In_ WDFTIMER Timer);
 VOID StartPacketTimerIfNecessary();
@@ -214,7 +219,13 @@ void PacketInjectionComplete(_Inout_ void* context,
   QUEUED_PACKET *packet = context;
   UNREFERENCED_PARAMETER(netBufferList);  
   UNREFERENCED_PARAMETER(dispatchLevel);  
-
+  if (packet->outbound) {
+    outPackets++;
+    outBytes += packet->packet_length;
+  } else {
+    inPackets++;
+    inBytes += packet->packet_length;
+  }
   FreeQueuedPacket(packet);
 }
 
@@ -308,9 +319,8 @@ void ProcessQueue(PACKET_QUEUE *queue) {
       }
     }
     KeReleaseInStackQueuedSpinLock(&lock);
-    if (packet) {
+    if (packet)
       InjectPacket(packet);
-    }
   } while (packet);
 }
 
@@ -437,6 +447,17 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
     }
   }
 
+  if (!queued) {
+    // Make sure to account for packet transfer when we are disabled or otherwise let packets through
+    if (outbound) {
+      outPackets++;
+      outBytes += packet_length;
+    } else {
+      inPackets++;
+      inBytes += packet_length;
+    }
+  }
+
   if (!queued && packet)
     FreeQueuedPacket(packet);
   
@@ -457,4 +478,13 @@ void ShaperGetStatus(SHAPER_STATUS *status) {
   status->params.outBufferBytes = outbound_queue.bufferBytes;
   status->inQueuedBytes = inbound_queue.queued_bytes;
   status->outQueuedBytes = outbound_queue.queued_bytes;
+}
+
+/*-----------------------------------------------------------------------------
+-----------------------------------------------------------------------------*/
+void ShaperGetStats(SHAPER_STATS *stats) {
+  stats->outBytes = outBytes;
+  stats->outPackets = outPackets;
+  stats->inBytes = inBytes;
+  stats->inPackets = inPackets;
 }

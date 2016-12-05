@@ -257,6 +257,25 @@ VOID EvtDeviceIOCtl(_In_ WDFQUEUE Queue,
       }
       break;
     }
+    case SHAPER_IOCTL_GET_STATS: {
+      if (OutputBufferLength >= sizeof(SHAPER_STATS)) {
+        WDFMEMORY pMemory;
+        SHAPER_STATS* shaper_stats;
+        status = WdfRequestRetrieveOutputMemory(Request, &pMemory);
+        if (NT_SUCCESS(status)) {
+          shaper_stats = (SHAPER_STATS *)WdfMemoryGetBuffer(pMemory, NULL);
+          if (shaper_stats) {
+            ShaperGetStats(shaper_stats);
+            WdfRequestSetInformation(Request, sizeof(SHAPER_STATS));
+          } else {
+            status = STATUS_INVALID_PARAMETER;
+          }
+        }
+      } else {
+        status = STATUS_INVALID_PARAMETER;
+      }
+      break;
+    }
     default: {
       DbgPrint("[shaper] IOCTL unknown command - %lu\n", IoControlCode);
       status = STATUS_INVALID_PARAMETER;

@@ -20,3 +20,4 @@ BOOLEAN ShaperEnable(_In_ unsigned short plr,
 
 BOOLEAN ShaperDisable();
 void ShaperGetStatus(SHAPER_STATUS *status);
+void ShaperGetStats(SHAPER_STATS *stats);
