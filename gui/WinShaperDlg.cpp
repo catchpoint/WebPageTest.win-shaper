@@ -308,6 +308,8 @@ void CWinShaperDlg::Enable() {
 -----------------------------------------------------------------------------*/
 void CWinShaperDlg::Disable() {
   KillTimer(1);
+  m_inboundQueue.SetPos(0);
+  m_outboundQueue.SetPos(0);
   if (driver_interface_ != INVALID_HANDLE_VALUE) {
     DWORD bytesReturned = 0;
     if (DeviceIoControl(driver_interface_, SHAPER_IOCTL_DISABLE, NULL, 0, NULL, 0, &bytesReturned, NULL))
