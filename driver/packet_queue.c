@@ -30,6 +30,7 @@ typedef struct {
    HANDLE         injection_handle;
    BOOLEAN        outbound;
    unsigned long  packet_length;  // Size of the packet (in bytes)
+   unsigned long  packet_count;	  // Number of packets in the packet buffer
    LARGE_INTEGER  latency_start;  // time it was placed in the latency queue
 
    // Data fields for packet re-injection.
@@ -220,10 +221,10 @@ void PacketInjectionComplete(_Inout_ void* context,
   UNREFERENCED_PARAMETER(netBufferList);  
   UNREFERENCED_PARAMETER(dispatchLevel);  
   if (packet->outbound) {
-    outPackets++;
+    outPackets += packet->packet_count;
     outBytes += packet->packet_length;
   } else {
-    inPackets++;
+    inPackets += packet->packet_count;
     inBytes += packet->packet_length;
   }
   FreeQueuedPacket(packet);
@@ -389,8 +390,16 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
   }
 
   // see if we need to drop the packet because the buffer is "full"
-  unsigned long packet_length = NET_BUFFER_DATA_LENGTH(NET_BUFFER_LIST_FIRST_NB((NET_BUFFER_LIST*)layerData));
-  if (traffic_shaping_enabled && queue->bufferBytes > 0 && queue->queued_bytes + packet_length > queue->bufferBytes)
+  NET_BUFFER_LIST *nbl = (NET_BUFFER_LIST*)layerData;
+  unsigned long data_length = 0;
+  int packet_count = 0;
+  NET_BUFFER *buffer = NET_BUFFER_LIST_FIRST_NB(nbl);
+  while (buffer) {
+	  packet_count++;
+	data_length += NET_BUFFER_DATA_LENGTH(buffer);
+	buffer = NET_BUFFER_NEXT_NB(buffer);
+  }
+  if (traffic_shaping_enabled && queue->bufferBytes > 0 && queue->queued_bytes + data_length > queue->bufferBytes)
     return TRUE;
 
   // clone the packet and add it to the appropriate queue
@@ -423,7 +432,8 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
       NTSTATUS status = STATUS_SUCCESS;
 
       // Clone the buffer
-      packet->packet_length = packet_length;
+      packet->packet_length = data_length;
+	  packet->packet_count = packet_count;
       if (bytesRetreated)
         status = NdisRetreatNetBufferDataStart(NET_BUFFER_LIST_FIRST_NB((NET_BUFFER_LIST*)layerData), bytesRetreated, 0, 0);
       if (NT_SUCCESS(status))
@@ -434,7 +444,7 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
       if (NT_SUCCESS(status)) {
         KLOCK_QUEUE_HANDLE lock;
         KeAcquireInStackQueuedSpinLock(&queue->lock, &lock);
-        queue->queued_bytes += packet_length;
+        queue->queued_bytes += data_length;
         InsertTailList(&queue->bandwidth_queue, &packet->listEntry);
         KeReleaseInStackQueuedSpinLock(&lock);
         packet = NULL;
@@ -450,11 +460,11 @@ BOOLEAN ShaperQueuePacket(_In_ const FWPS_INCOMING_VALUES* inFixedValues,
   if (!queued) {
     // Make sure to account for packet transfer when we are disabled or otherwise let packets through
     if (outbound) {
-      outPackets++;
-      outBytes += packet_length;
+      packet_count += packet_count;
+      outBytes += data_length;
     } else {
-      inPackets++;
-      inBytes += packet_length;
+      inPackets += packet_count;
+      inBytes += data_length;
     }
   }
 
