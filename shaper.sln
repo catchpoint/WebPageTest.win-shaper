@@ -4,10 +4,16 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "shaper", "driver\shaper.vcxproj", "{5D2037F7-4766-4CEB-AA18-1DAFBBB60B7B}"
+	ProjectSection(ProjectDependencies) = postProject
+		{124E7C05-F022-4A67-AB2F-20B1C0D66EF9} = {124E7C05-F022-4A67-AB2F-20B1C0D66EF9}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "exe", "exe\exe.vcxproj", "{124E7C05-F022-4A67-AB2F-20B1C0D66EF9}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gui", "gui\gui.vcxproj", "{7DE1E0E7-CB08-46D8-BC29-C8BE2AECF6C4}"
+	ProjectSection(ProjectDependencies) = postProject
+		{5D2037F7-4766-4CEB-AA18-1DAFBBB60B7B} = {5D2037F7-4766-4CEB-AA18-1DAFBBB60B7B}
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

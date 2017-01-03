@@ -1,5 +1,5 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
-<Project DefaultTargets="Build" ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -40,7 +40,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{5D2037F7-4766-4CEB-AA18-1DAFBBB60B7B}</ProjectGuid>
     <TemplateGuid>{497e31cb-056b-4f31-abb8-447fd55ee5a5}</TemplateGuid>
-    <TargetFrameworkVersion>v4.5</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.5.2</TargetFrameworkVersion>
     <MinimumVisualStudioVersion>12.0</MinimumVisualStudioVersion>
     <Configuration>Debug</Configuration>
     <Platform Condition="'$(Platform)' == ''">Win32</Platform>
@@ -197,6 +197,11 @@
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
     </DriverSign>
+    <PostBuildEvent>
+      <Command>copy /Y $(OutDir)shaper\$(TargetName).sys $(SolutionDir)\bin\x86\shaper.sys
+copy /Y $(OutDir)shaper\$(TargetName).inf $(SolutionDir)\bin\x86\shaper.inf
+copy /Y $(OutDir)shaper\$(TargetName).cat $(SolutionDir)\bin\x86\shaper.cat</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -228,6 +233,11 @@
     <DriverSign>
       <FileDigestAlgorithm>sha256</FileDigestAlgorithm>
     </DriverSign>
+    <PostBuildEvent>
+      <Command>copy /Y $(OutDir)shaper\$(TargetName).sys $(SolutionDir)\bin\x64\$(TargetName).sys
+copy /Y $(OutDir)shaper\$(TargetName).inf $(SolutionDir)\bin\x64\$(TargetName).inf
+copy /Y $(OutDir)shaper\$(TargetName).cat $(SolutionDir)\bin\x64\$(TargetName).cat</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <ClCompile>
