@@ -136,7 +136,7 @@
       <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y $(OutDir)$(TargetName).exe $(SolutionDir)bin\x86\$(TargetName).exe</Command>
+      <Command>copy /Y $(OutDir)$(TargetName).exe $(SolutionDir)bin\$(TargetName).exe</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -159,7 +159,8 @@
       <UACExecutionLevel>RequireAdministrator</UACExecutionLevel>
     </Link>
     <PostBuildEvent>
-      <Command>copy /Y $(OutDir)$(TargetName).exe $(SolutionDir)bin\x64\$(TargetName).exe</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
