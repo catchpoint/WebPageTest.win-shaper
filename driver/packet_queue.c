@@ -285,7 +285,7 @@ void ProcessQueue(PACKET_QUEUE *queue) {
     if (!IsListEmpty(&queue->bandwidth_queue)) {
       LIST_ENTRY * listEntry = RemoveHeadList(&queue->bandwidth_queue);
       packet = CONTAINING_RECORD(listEntry, QUEUED_PACKET, listEntry);
-      if (!traffic_shaping_enabled || packet->packet_length <= queue->available_bytes) {
+      if (!traffic_shaping_enabled || queue->bps == 0 || packet->packet_length <= queue->available_bytes) {
         queue->available_bytes -= packet->packet_length;
         queue->queued_bytes -= packet->packet_length;
         packet->latency_start = KeQueryPerformanceCounter(NULL);
