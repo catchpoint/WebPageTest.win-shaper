@@ -97,7 +97,7 @@ bool Install() {
 }
 
 
-bool Stop() {
+bool Stop(bool silent = false) {
   bool ok = false;
   SC_HANDLE scm = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS); 
   if (scm) {
@@ -118,31 +118,31 @@ bool Stop() {
             } while(status.dwCurrentState == SERVICE_STOP_PENDING && count < 600);
             if (status.dwCurrentState == SERVICE_STOPPED) {
               ok = true;
-            } else {
+            } else if (!silent) {
               printf("Error waiting for service to stop\n");
             }
-          } else {
+          } else if (!silent) {
             printf("Failed to stop the service\n");
           }
         } else {
           ok = true;
         }
-      } else {
+      } else if (!silent) {
         printf("Failed to query the current service status\n");
       }
       CloseServiceHandle(service);
-    } else {
+    } else if (!silent) {
       printf("Failed to open the shaper service\n");
     }
     CloseServiceHandle(scm);
-  } else {
+  } else if (!silent) {
     printf("Failed to open the Service Control Manager\n");
   }
   return ok;
 }
 
-bool Remove() {
-  bool ok = Stop();
+bool Remove(bool silent = false) {
+  bool ok = Stop(silent);
   if (ok) {
     ok = false;
     SC_HANDLE scm = OpenSCManager(NULL, NULL, SC_MANAGER_ALL_ACCESS); 
@@ -151,15 +151,15 @@ bool Remove() {
       if (service) {
         if (DeleteService(service)) {
           ok = true;
-        } else {
+        } else if (!silent) {
           printf("DeleteService failed\n");
         }
         CloseServiceHandle(service);
-      } else {
+      } else if (!silent) {
         printf("Failed to open the shaper service\n");
       }
       CloseServiceHandle(scm);
-    } else {
+    } else if (!silent) {
       printf("Failed to open the Service Control Manager\n");
     }
   }
@@ -232,7 +232,7 @@ int main(int argc, char **argv) {
   if (argc > 1) {
     DWORD bytesReturned = 0;
     if (!lstrcmpiA(argv[1], "install")) {
-      Remove(); // uninstall first in case an older version is registered
+      Remove(true); // uninstall first in case an older version is registered
       ok = Install();
     } else if (!lstrcmpiA(argv[1], "remove")) {
       ok = Remove();
@@ -284,9 +284,7 @@ int main(int argc, char **argv) {
       ok = Reset();
     }
   }
-  if (ok) {
-    printf("OK\n");
-  } else {
+  if (!ok) {
     usage();
   }
   return ok ? 0 : 1;
